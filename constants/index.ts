@@ -228,3 +228,49 @@ export const dummyInterviews: Interview[] = [
     createdAt: "2024-03-14T15:30:00Z",
   },
 ];
+
+export const generatorAssistant: CreateAssistantDTO = {
+  name: "Interview Generator",
+  firstMessage: "Hi! I will ask a few quick questions to set up your interview. Ready?",
+  transcriber: {
+    provider: "deepgram",
+    model: "nova-2",
+    language: "en",
+  },
+  voice: {
+    provider: "11labs",
+    voiceId: "sarah",
+    stability: 0.5,
+    similarityBoost: 0.9,
+    speed: 0.95,
+    useSpeakerBoost: true,
+  },
+  model: {
+    provider: "openai",
+    model: "gpt-4",
+    messages: [
+      {
+        role: "system",
+        content: `
+You are a short, helpful voice assistant collecting the following values in this exact order:
+
+1) role (example: Frontend Engineer)
+2) type (technical | behavioural | mixed)
+3) level (Junior | Mid | Senior)
+4) techstack (comma separated tech like React, Node, NextJS)
+5) amount (number 1–20)
+
+RULES:
+- Ask ONE question at a time.
+- If the answer is unclear, invalid, or missing values, politely ask again.
+- Keep messages short and conversational (1–2 sentences).
+- After all values are collected, respond EXACTLY in this format as a single message:
+
+{ "role": "<role>", "type": "<type>", "level": "<level>", "techstack": "<stack>", "amount": <number> }
+
+- After this, thank the user, wish him a good day, tell him that his interview will be generated shortly, and politely ask them to leave the meet now.
+        `,
+      },
+    ],
+  },
+};

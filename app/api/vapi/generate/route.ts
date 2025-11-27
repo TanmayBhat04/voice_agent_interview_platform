@@ -4,34 +4,125 @@ import { google } from "@ai-sdk/google";
 import { db } from "@/firebase/admin";
 import { getRandomInterviewCover } from "@/lib/utils";
 
+//
+// ⭐ CORS SECTION — ONLY NEW ADDITION
+//
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Credentials": "true",
+};
+
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: CORS_HEADERS,
+  });
+}
+// ⭐ END OF CORS SECTION
+//
+
+function safeJsonParse(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]$/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
-  const { type, role, level, techstack, amount, userid } = await request.json();
+  const body = await request.json().catch(() => ({}));
+  const { messages, userId } = body;
+
+  if (!Array.isArray(messages)) {
+    return new Response(
+      JSON.stringify({ success: false, error: "Invalid or missing 'messages' array" }),
+      { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+    );
+  }
+
+  if (!userId) {
+    return new Response(
+      JSON.stringify({ success: false, error: "Missing 'userId' in request body" }),
+      { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+    );
+  }
 
   try {
-    const { text: questions } = await generateText({
+    const { text: extractedText } = await generateText({
       model: google("gemini-2.0-flash-001"),
-      prompt: `Prepare questions for a job interview.
-        The job role is ${role}.
-        The job experience level is ${level}.
-        The tech stack used in the job is: ${techstack}.
-        The focus between behavioural and technical questions should lean towards: ${type}.
-        The amount of questions required is: ${amount}.
-        Please return only the questions, without any additional text.
-        The questions are going to be read by a voice assistant so do not use "/" or "*" or any other special characters which might break the voice assistant.
-        Return the questions formatted like this:
-        ["Question 1", "Question 2", "Question 3"]
-        
-        Thank you! <3
-    `,
+      prompt: `
+You will be given a conversation between a user and an assistant.
+Your job is to extract ONLY the following fields from the conversation and return exactly one valid JSON object (no extra text):
+
+- role (job role)
+- level (experience level)
+- techstack (comma separated)
+- type (behavioural or technical focus)
+- amount (number of questions)
+
+If a field is missing, return an empty string for text fields and null for amount.
+
+Conversation:
+${JSON.stringify(messages, null, 2)}
+`
     });
+
+    const extracted = safeJsonParse(extractedText);
+    if (!extracted || typeof extracted !== "object") {
+      throw new Error("Failed to parse extracted variables from model output.");
+    }
+
+    const role = (extracted.role || "").toString().trim();
+    const level = (extracted.level || "").toString().trim();
+    const techstack = (extracted.techstack || "").toString().trim();
+    const type = (extracted.type || "mixed").toString().trim();
+    const amountRaw = extracted.amount;
+    const amountParsed = Number.isInteger(amountRaw) ? amountRaw : parseInt(amountRaw, 10);
+    const safeAmount = Number.isFinite(amountParsed) && amountParsed > 0 ? amountParsed : 10;
+    const finalAmount = Math.min(safeAmount, 50);
+
+    const { text: questionsText } = await generateText({
+      model: google("gemini-2.0-flash-001"),
+      prompt: `Prepare ${finalAmount} questions for a job interview.
+            The job role is ${role || "unspecified"}.
+            The job experience level is ${level || "unspecified"}.
+            The tech stack used in the job is: ${techstack || "unspecified"}.
+            The focus between behavioural and technical questions should lean towards: ${type || "mixed"}.
+            Please return ONLY a JSON array in this exact format:
+            ["Question 1", "Question 2", ...]
+            Do NOT include any extra text or explanation.
+            Avoid using "/" "*" backticks or other special characters that could break TTS.
+        `,
+    });
+
+    const parsedQuestions = safeJsonParse(questionsText);
+    if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
+      throw new Error("Model did not return a valid questions array");
+    }
+
+    const questions = parsedQuestions.map((q: any) => (q || "").toString().trim());
+
+    const techstackArray = techstack
+      ? techstack.split(",").map((s: string) => s.trim()).filter(Boolean)
+      : [];
 
     const interview = {
       role: role,
       type: type,
       level: level,
-      techstack: techstack.split(","),
-      questions: JSON.parse(questions),
-      userId: userid,
+      techstack: techstackArray,
+      questions: questions,
+      userId: userId,
       finalized: true,
       coverImage: getRandomInterviewCover(),
       createdAt: new Date().toISOString(),
@@ -39,13 +130,23 @@ export async function POST(request: Request) {
 
     await db.collection("interviews").add(interview);
 
-    return Response.json({ success: true }, { status: 200 });
+    return new Response(
+      JSON.stringify({ success: true }),
+      { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+    );
+
   } catch (error) {
     console.error("Error:", error);
-    return Response.json({ success: false, error: error }, { status: 500 });
+    return new Response(
+      JSON.stringify({ success: false, error: String(error) }),
+      { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+    );
   }
 }
 
 export async function GET() {
-  return Response.json({ success: true, data: "Thank you!" }, { status: 200 });
+  return new Response(
+    JSON.stringify({ success: true, data: "Thank you!" }),
+    { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+  );
 }

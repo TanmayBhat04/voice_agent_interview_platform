@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 import { vapi } from "@/lib/vapi.sdk";
-import { interviewer } from "@/constants";
+import { interviewer, generatorAssistant } from "@/constants";
 import { createFeedback } from "@/lib/actions/general.action";
 
 enum CallStatus {
@@ -106,19 +106,35 @@ const Agent = ({
     };
 
     if (callStatus === CallStatus.FINISHED) {
-      if (type === "generate") {
-        router.push("/");
-      } else {
-        handleGenerateFeedback(messages);
+        // Use an async IIFE so we can await safely
+        (async () => {
+          if (type === "generate") {
+            try {
+              await fetch("https://voice-agent-interview-platform.vercel.app/api/vapi/generate", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ messages, userId }),
+              });
+            } catch (err) {
+              console.error("Error sending transcript:", err);
+            }
+
+            router.push("/");
+          } else {
+            // await the feedback generation so we handle errors / navigation order
+            await handleGenerateFeedback(messages);
+          }
+        })();
       }
-    }
   }, [messages, callStatus, feedbackId, interviewId, router, type, userId]);
 
   const handleCall = async () => {
     setCallStatus(CallStatus.CONNECTING);
 
     if (type === "generate") {
-      await vapi.start(process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID!, {
+      await vapi.start(generatorAssistant, {
         variableValues: {
           username: userName,
           userid: userId,
