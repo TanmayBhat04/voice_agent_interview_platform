@@ -93,16 +93,28 @@ ${JSON.stringify(messages, null, 2)}
 
     const { text: questionsText } = await generateText({
       model: google("gemini-2.0-flash-001"),
-      prompt: `Prepare ${finalAmount} questions for a job interview.
-            The job role is ${role || "unspecified"}.
-            The job experience level is ${level || "unspecified"}.
-            The tech stack used in the job is: ${techstack || "unspecified"}.
-            The focus between behavioural and technical questions should lean towards: ${type || "mixed"}.
-            Please return ONLY a JSON array in this exact format:
-            ["Question 1", "Question 2", ...]
-            Do NOT include any extra text or explanation.
-            Avoid using "/" "*" backticks or other special characters that could break TTS.
-        `,
+      prompt: `
+      You MUST return ONLY valid JSON.
+
+      Generate exactly ${finalAmount} interview questions based on:
+      - Role: "${role || "unspecified"}"
+      - Level: "${level || "unspecified"}"
+      - Techstack: "${techstack || "unspecified"}"
+      - Focus: "${type || "mixed"}"
+
+      Return ONLY a JSON array.
+      NO explanation.
+      NO sentences.
+      NO markdown.
+      NO notes.
+      NO extra text.
+
+      Example format:
+      [
+        "Question 1",
+        "Question 2"
+      ]
+      `
     });
 
     const parsedQuestions = safeJsonParse(questionsText);
