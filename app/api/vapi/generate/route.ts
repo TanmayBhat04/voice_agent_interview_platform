@@ -39,6 +39,11 @@ function safeJsonParse(text: string) {
   }
 }
 
+function truncate(str: string | null | undefined, n = 2000) {
+  if (!str) return "";
+  return str.length > n ? str.slice(0, n) + `... (truncated ${str.length - n} chars)` : str;
+}
+
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const { messages, userId } = body;
@@ -57,8 +62,13 @@ export async function POST(request: Request) {
     );
   }
 
+  // for debugging: capture model outputs
+  let extractedText: string | null = null;
+  let questionsText: string | null = null;
+  let parsedQuestions: any = null;
+
   try {
-    const { text: extractedText } = await generateText({
+    const { text: extText } = await generateText({
       model: google("gemini-2.0-flash-001"),
       prompt: `
 You will be given a conversation between a user and an assistant.
@@ -76,9 +86,11 @@ Conversation:
 ${JSON.stringify(messages, null, 2)}
 `
     });
+    extractedText = extText ?? null;
 
-    const extracted = safeJsonParse(extractedText);
+    const extracted = safeJsonParse(extractedText || "");
     if (!extracted || typeof extracted !== "object") {
+      console.error("DEBUG: Failed to parse extractedText:", extractedText);
       throw new Error("Failed to parse extracted variables from model output.");
     }
 
@@ -91,7 +103,7 @@ ${JSON.stringify(messages, null, 2)}
     const safeAmount = Number.isFinite(amountParsed) && amountParsed > 0 ? amountParsed : 10;
     const finalAmount = Math.min(safeAmount, 50);
 
-    const { text: questionsText } = await generateText({
+    const { text: qText } = await generateText({
       model: google("gemini-2.0-flash-001"),
       prompt: `
       You MUST return ONLY valid JSON.
@@ -116,10 +128,30 @@ ${JSON.stringify(messages, null, 2)}
       ]
       `
     });
+    questionsText = qText ?? null;
 
-    const parsedQuestions = safeJsonParse(questionsText);
+    parsedQuestions = safeJsonParse(questionsText || "");
     if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
-      throw new Error("Model did not return a valid questions array");
+      // DEBUG: log the exact raw outputs so you can inspect them in Vercel logs
+      console.error("DEBUG: parsedQuestions invalid.");
+      console.error("DEBUG: extractedText:", extractedText);
+      console.error("DEBUG: questionsText:", questionsText);
+      console.error("DEBUG: parsedQuestions (raw):", parsedQuestions);
+
+      // Return detailed debug info in the response (truncated)
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Model did not return a valid questions array",
+          debug: {
+            extractedText: truncate(extractedText, 2000),
+            questionsText: truncate(questionsText, 2000),
+            parsedQuestionsType: Object.prototype.toString.call(parsedQuestions),
+            parsedQuestionsSample: parsedQuestions && Array.isArray(parsedQuestions) ? parsedQuestions.slice(0, 5) : parsedQuestions,
+          },
+        }),
+        { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+      );
     }
 
     const questions = parsedQuestions.map((q: any) => (q || "").toString().trim());
@@ -148,9 +180,21 @@ ${JSON.stringify(messages, null, 2)}
     );
 
   } catch (error) {
-    console.error("Error:", error);
+    console.error("Unhandled Error in /api/vapi/generate:", error);
+    // also print captured model outputs
+    if (extractedText) console.error("Captured extractedText (truncated):", truncate(extractedText, 2000));
+    if (questionsText) console.error("Captured questionsText (truncated):", truncate(questionsText, 2000));
+
     return new Response(
-      JSON.stringify({ success: false, error: String(error) }),
+      JSON.stringify({
+        success: false,
+        error: String(error),
+        debug: {
+          extractedText: truncate(extractedText, 2000),
+          questionsText: truncate(questionsText, 2000),
+          parsedQuestionsType: typeof parsedQuestions,
+        },
+      }),
       { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
     );
   }
