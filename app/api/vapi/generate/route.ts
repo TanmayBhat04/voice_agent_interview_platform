@@ -23,6 +23,17 @@ export async function OPTIONS() {
 // ⭐ END OF CORS SECTION
 //
 
+//
+// ⭐ NEW FIX: strip ```json ``` wrappers
+//
+function cleanJSONBlock(block: string | null) {
+  if (!block) return null;
+  return block
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
+}
+
 function safeJsonParse(text: string) {
   try {
     return JSON.parse(text);
@@ -130,15 +141,19 @@ ${JSON.stringify(messages, null, 2)}
     });
     questionsText = qText ?? null;
 
-    parsedQuestions = safeJsonParse(questionsText || "");
+    //
+    // ⭐ FIX APPLIED HERE
+    //
+    const cleanedQuestions = cleanJSONBlock(questionsText || "");
+    parsedQuestions = safeJsonParse(cleanedQuestions || "");
+
     if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
-      // DEBUG: log the exact raw outputs so you can inspect them in Vercel logs
       console.error("DEBUG: parsedQuestions invalid.");
       console.error("DEBUG: extractedText:", extractedText);
       console.error("DEBUG: questionsText:", questionsText);
+      console.error("DEBUG: cleanedQuestions:", cleanedQuestions);
       console.error("DEBUG: parsedQuestions (raw):", parsedQuestions);
 
-      // Return detailed debug info in the response (truncated)
       return new Response(
         JSON.stringify({
           success: false,
@@ -146,8 +161,12 @@ ${JSON.stringify(messages, null, 2)}
           debug: {
             extractedText: truncate(extractedText, 2000),
             questionsText: truncate(questionsText, 2000),
+            cleanedQuestions,
             parsedQuestionsType: Object.prototype.toString.call(parsedQuestions),
-            parsedQuestionsSample: parsedQuestions && Array.isArray(parsedQuestions) ? parsedQuestions.slice(0, 5) : parsedQuestions,
+            parsedQuestionsSample:
+              parsedQuestions && Array.isArray(parsedQuestions)
+                ? parsedQuestions.slice(0, 5)
+                : parsedQuestions,
           },
         }),
         { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
@@ -181,7 +200,6 @@ ${JSON.stringify(messages, null, 2)}
 
   } catch (error) {
     console.error("Unhandled Error in /api/vapi/generate:", error);
-    // also print captured model outputs
     if (extractedText) console.error("Captured extractedText (truncated):", truncate(extractedText, 2000));
     if (questionsText) console.error("Captured questionsText (truncated):", truncate(questionsText, 2000));
 
